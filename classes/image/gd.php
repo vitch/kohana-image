@@ -416,7 +416,7 @@ class Image_GD extends Image {
 	 */
 	protected function _save_function($extension, & $quality)
 	{
-		switch ($extension)
+		switch (strtolower($extension))
 		{
 			case 'jpg':
 			case 'jpeg':
