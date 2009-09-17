@@ -135,6 +135,30 @@ abstract class Kohana_Image {
 			return '';
 		}
 	}
+	/**
+	 * Resize and crop the image to the given size. The image will be resized to
+	 * as small as it can be to fit within the given width and height and then
+	 * the exact width and height will be cropped from the middle of the image.
+	 * 
+	 * This allows you to get a fixed size image which includes as much as possible
+	 * of the provided image.
+	 *
+	 * @param   integer  new width
+	 * @param   integer  new height
+	 * @return  $this
+	 */
+	public function resize_and_crop($width = NULL, $height = NULL)
+	{
+		$aspectRatio = $this->width / $this->height;
+		$destAspectRatio = $width / $height;
+		if ($aspectRatio > $destAspectRatio) {
+			$this->resize(NULL, $height);
+		} else {
+			$this->resize($width, NULL);
+		}
+		$this->crop($width, $height);
+		return $this;
+	}
 
 	/**
 	 * Resize the image to the given size. Either the width or the height can
