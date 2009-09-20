@@ -81,7 +81,11 @@ abstract class Kohana_Image {
 		try
 		{
 			// Get the real path to the file
-			$file = realpath($file);
+			$f = realpath($file);
+			
+			if ($f == '') {
+				$f = $file;
+			}
 
 			// Get the image information
 			$info = getimagesize($file);
