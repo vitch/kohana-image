@@ -1,14 +1,25 @@
 <?php defined('SYSPATH') or die('No direct script access.');
 /**
- * Image manipulation class using {@link  http://php.net/gd GD}.
+ * Support for image manipulation using [GD](http://php.net/GD).
  *
- * @package    Image
+ * @package    Kohana/Image
+ * @category   Drivers
  * @author     Kohana Team
  * @copyright  (c) 2008-2009 Kohana Team
  * @license    http://kohanaphp.com/license.html
  */
 class Kohana_Image_GD extends Image {
 
+	// Is GD bundled or separate?
+	protected static $_bundled;
+
+	/**
+	 * Checks if GD is enabled and bundled. Bundled GD is required for some
+	 * methods to work. Exceptions will be thrown from those methods when GD is
+	 * not bundled.
+	 *
+	 * @return  boolean
+	 */
 	public static function check()
 	{
 		if ( ! function_exists('gd_info'))
@@ -19,20 +30,15 @@ class Kohana_Image_GD extends Image {
 		if (defined('GD_BUNDLED'))
 		{
 			// Get the version via a constant, available in PHP 5.
-			$bundled = GD_BUNDLED;
+			Image_GD::$_bundled = GD_BUNDLED;
 		}
 		else
 		{
 			// Get the version information
-			$bundled = current(gd_info());
+			$info = gd_info();
 
 			// Extract the bundled status
-			$bundled = (bool) preg_match('/\bbundled\b/i', $bundled);
-		}
-
-		if ( ! $bundled)
-		{
-			throw new Kohana_Exception('Image_GD requires GD to be bundled with PHP');
+			Image_GD::$_bundled = (bool) preg_match('/\bbundled\b/i', $info['GD Version']);
 		}
 
 		if (defined('GD_VERSION'))
@@ -43,19 +49,19 @@ class Kohana_Image_GD extends Image {
 		else
 		{
 			// Get the version information
-			$version = current(gd_info());
+			$info = gd_info();
 
 			// Extract the version number
-			preg_match('/\d+\.\d+(?:\.\d+)?/', $version, $matches);
+			preg_match('/\d+\.\d+(?:\.\d+)?/', $info['GD Version'], $matches);
 
 			// Get the major version
 			$version = $matches[0];
 		}
 
-		if ( ! version_compare($version, '2.0', '>='))
+		if ( ! version_compare($version, '2.0.1', '>='))
 		{
-			throw new Kohana_Exception('Image_GD requires GD version 2.0 or greater, you have :version',
-				array(':version' => $version));
+			throw new Kohana_Exception('Image_GD requires GD version :required or greater, you have :version',
+				array('required' => '2.0.1', ':version' => $version));
 		}
 
 		return Image_GD::$_checked = TRUE;
@@ -64,6 +70,15 @@ class Kohana_Image_GD extends Image {
 	// Temporary image resource
 	protected $_image;
 
+	// Function name to open Image
+	protected $_create_function;
+
+	/**
+	 * Runs [Image_GD::check] and loads the image.
+	 *
+	 * @return  void
+	 * @throws  Kohana_Exception
+	 */
 	public function __construct($file)
 	{
 		if ( ! Image_GD::$_checked)
@@ -94,13 +109,18 @@ class Kohana_Image_GD extends Image {
 				array(':type' => image_type_to_extension($this->type, FALSE)));
 		}
 
-		// Open the temporary image
-		$this->_image = $create($this->file);
+		// Save function for future use
+		$this->_create_function = $create;
 
-		// Preserve transparency when saving
-		imagesavealpha($this->_image, TRUE);
+		// Save filename for lazy loading
+		$this->_image = $this->file;
 	}
 
+	/**
+	 * Destroys the loaded image to free up resources.
+	 *
+	 * @return  void
+	 */
 	public function __destruct()
 	{
 		if (is_resource($this->_image))
@@ -110,11 +130,34 @@ class Kohana_Image_GD extends Image {
 		}
 	}
 
+	/**
+	 * Loads an image into GD.
+	 *
+	 * @return  void
+	 */
+	protected function _load_image()
+	{
+		if ( ! is_resource($this->_image))
+		{
+			// Gets create function
+			$create = $this->_create_function;
+
+			// Open the temporary image
+			$this->_image = $create($this->file);
+
+			// Preserve transparency when saving
+			imagesavealpha($this->_image, TRUE);
+		}
+	}
+
 	protected function _do_resize($width, $height)
 	{
 		// Presize width and height
 		$pre_width = $this->width;
 		$pre_height = $this->height;
+
+		// Loads image if not yet loaded
+		$this->_load_image();
 
 		// Test if we can do a resize without resampling to speed up the final resize
 		if ($width > ($this->width / 2) AND $height > ($this->height / 2))
@@ -162,6 +205,9 @@ class Kohana_Image_GD extends Image {
 		// Create the temporary image to copy to
 		$image = $this->_create($width, $height);
 
+		// Loads image if not yet loaded
+		$this->_load_image();
+
 		// Execute the crop
 		if (imagecopyresampled($image, $this->_image, 0, 0, $offset_x, $offset_y, $width, $height, $width, $height))
 		{
@@ -177,6 +223,15 @@ class Kohana_Image_GD extends Image {
 
 	protected function _do_rotate($degrees)
 	{
+		if ( ! Image_GD::$_bundled)
+		{
+			throw new Kohana_Exception('This method requires :function, which is only available in the bundled version of GD',
+				array(':function' => 'imagerotate'));
+		}
+
+		// Loads image if not yet loaded
+		$this->_load_image();
+
 		// Transparent black will be used as the background for the uncovered region
 		$transparent = imagecolorallocatealpha($this->_image, 0, 0, 0, 127);
 
@@ -207,6 +262,9 @@ class Kohana_Image_GD extends Image {
 		// Create the flipped image
 		$flipped = $this->_create($this->width, $this->height);
 
+		// Loads image if not yet loaded
+		$this->_load_image();
+
 		if ($direction === Image::HORIZONTAL)
 		{
 			for ($x = 0; $x < $this->width; $x++)
@@ -235,6 +293,15 @@ class Kohana_Image_GD extends Image {
 
 	protected function _do_sharpen($amount)
 	{
+		if ( ! Image_GD::$_bundled)
+		{
+			throw new Kohana_Exception('This method requires :function, which is only available in the bundled version of GD',
+				array(':function' => 'imageconvolution'));
+		}
+
+		// Loads image if not yet loaded
+		$this->_load_image();
+
 		// Amount should be in the range of 18-10
 		$amount = round(abs(-18 + ($amount * 0.08)), 2);
 
@@ -257,6 +324,15 @@ class Kohana_Image_GD extends Image {
 
 	protected function _do_reflection($height, $opacity, $fade_in)
 	{
+		if ( ! Image_GD::$_bundled)
+		{
+			throw new Kohana_Exception('This method requires :function, which is only available in the bundled version of GD',
+				array(':function' => 'imagefilter'));
+		}
+
+		// Loads image if not yet loaded
+		$this->_load_image();
+
 		// Convert an opacity range of 0-100 to 127-0
 		$opacity = round(abs(($opacity * 127 / 100) - 127));
 
@@ -320,6 +396,15 @@ class Kohana_Image_GD extends Image {
 
 	protected function _do_watermark(Image $watermark, $offset_x, $offset_y, $opacity)
 	{
+		if ( ! Image_GD::$_bundled)
+		{
+			throw new Kohana_Exception('This method requires :function, which is only available in the bundled version of GD',
+				array(':function' => 'imagelayereffect'));
+		}
+
+		// Loads image if not yet loaded
+		$this->_load_image();
+
 		// Create the watermark image resource
 		$overlay = imagecreatefromstring($watermark->render());
 
@@ -354,6 +439,9 @@ class Kohana_Image_GD extends Image {
 
 	protected function _do_background($r, $g, $b, $opacity)
 	{
+		// Loads image if not yet loaded
+		$this->_load_image();
+
 		// Convert an opacity range of 0-100 to 127-0
 		$opacity = round(abs(($opacity * 127 / 100) - 127));
 
@@ -380,6 +468,9 @@ class Kohana_Image_GD extends Image {
 
 	protected function _do_save($file, $quality)
 	{
+		// Loads image if not yet loaded
+		$this->_load_image();
+
 		// Get the extension of the file
 		$extension = pathinfo($file, PATHINFO_EXTENSION);
 
@@ -401,6 +492,9 @@ class Kohana_Image_GD extends Image {
 
 	protected function _do_render($type, $quality)
 	{
+		// Loads image if not yet loaded
+		$this->_load_image();
+
 		// Get the save function and IMAGETYPE
 		list($save, $type) = $this->_save_function($type, $quality);
 
@@ -424,14 +518,14 @@ class Kohana_Image_GD extends Image {
 	 * Get the GD saving function and image type for this extension.
 	 * Also normalizes the quality setting
 	 *
-	 * @throws  Kohana_Exception
 	 * @param   string   image type: png, jpg, etc
 	 * @param   integer  image quality
 	 * @return  array    save function, IMAGETYPE_* constant
+	 * @throws  Kohana_Exception
 	 */
 	protected function _save_function($extension, & $quality)
 	{
-		switch ($extension)
+		switch (strtolower($extension))
 		{
 			case 'jpg':
 			case 'jpeg':
@@ -457,7 +551,7 @@ class Kohana_Image_GD extends Image {
 			break;
 			default:
 				throw new Kohana_Exception('Installed GD does not support :type images',
-					array(':type' => $type));
+					array(':type' => $extension));
 			break;
 		}
 
